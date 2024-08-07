@@ -90,10 +90,17 @@ double getTime() {
 #endif // WIN32
 
 struct Marker {
-    Marker(const std::string& name) {
-        fprintf(stderr, "<MARK>%s:", name.c_str()); fflush(stderr);
+    Marker(const std::string& name): loud(name.size() > 0) {
+        if (loud) {
+            fprintf(stderr, "<MARK>%s:", name.c_str());
+            fflush(stderr);
+        }
     }
     ~Marker() {
-        fprintf(stderr, "</MARK>\n"); fflush(stderr);
+        if (loud) {
+            fprintf(stderr, "</MARK>\n");
+            fflush(stderr);
+        }
     }
+    bool loud;
 };

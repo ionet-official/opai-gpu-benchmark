@@ -1,9 +1,10 @@
-﻿#include <cuda_runtime.h>  
+﻿#include <vector>
+
+#include <cuda_runtime.h>
 #include <cuda_fp16.h>
 
 #include "common.h"
-
-#include <vector>
+#include "timer.h"
 
 typedef float BTYPE;
 
@@ -51,6 +52,21 @@ size_t availMemory() {
 }
 
 int main(int argc, char** argv) {
+    if (argc > 2) {
+        fprintf(stderr, "Usage: %s [timeout-in-sec]\n", argv[0]);
+        return 1;
+    }
+    int timeout = -1;
+    bool parseable_stats = false;
+    Killswitch timer;
+    if (argc > 1) {
+        timeout = std::stoi(argv[1]);
+        if (timeout > 0) {
+            parseable_stats = true;
+            timer.start(timeout);
+        }
+    }
+
     printf("-- OPAI GPU Benchmark -- \n");
 
     int deviceCount;
@@ -61,8 +77,8 @@ int main(int argc, char** argv) {
     }
 
     {
-        Marker m("device-info");
-        fprintf(stderr, "[");
+        Marker m(parseable_stats ? "device-info" : "");
+        if (parseable_stats) fprintf(stderr, "[");
         for (int i = 0; i < deviceCount; i++)
         {
             cudaDeviceProp devProp;
@@ -76,13 +92,15 @@ int main(int argc, char** argv) {
             printf("Max Threads / SM: %d\n", devProp.maxThreadsPerMultiProcessor);
             printf("======================================================\n");
 
-            fprintf(stderr, "{\"name\":\"%s\",\"global_mem\":%zu,\"sm_count\":%d,\"shared_block_mem\":%zu," \
-                            "\"max_block_threads\":%d,\"block_regs\":%d,\"max_sm_threads\":%d}%s",
-                devProp.name, devProp.totalGlobalMem, devProp.multiProcessorCount, devProp.sharedMemPerBlock,
-                devProp.maxThreadsPerBlock, devProp.regsPerBlock, devProp.maxThreadsPerMultiProcessor,
-                (i < deviceCount - 1) ? "," : "");
+            if (parseable_stats) {
+                fprintf(stderr, "{\"name\":\"%s\",\"global_mem\":%zu,\"sm_count\":%d,\"shared_block_mem\":%zu," \
+                                "\"max_block_threads\":%d,\"block_regs\":%d,\"max_sm_threads\":%d}%s",
+                    devProp.name, devProp.totalGlobalMem, devProp.multiProcessorCount, devProp.sharedMemPerBlock,
+                    devProp.maxThreadsPerBlock, devProp.regsPerBlock, devProp.maxThreadsPerMultiProcessor,
+                    (i < deviceCount - 1) ? "," : "");
+            }
         }
-        fprintf(stderr, "]");
+        if (parseable_stats) fprintf(stderr, "]");
     }
 
     //////////////////////////////////////////////////////
@@ -242,7 +260,7 @@ int main(int argc, char** argv) {
         cudaStatus = cudaGetLastError();
         if (cudaStatus != cudaSuccess) {
             fprintf(stderr, "calcKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-            return 0;
+            return 2;
         }
     }
 
@@ -255,7 +273,7 @@ int main(int argc, char** argv) {
         cudaStatus = cudaDeviceSynchronize();
         if (cudaStatus != cudaSuccess) {
             fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching iKernel!\n", cudaStatus);
-            return 0;
+            return 3;
         }
     }
 
@@ -278,13 +296,13 @@ int main(int argc, char** argv) {
     }
 
     {
-        Marker m("compute-result");
-        fprintf(stderr, "[");
+        Marker m(parseable_stats ? "compute-result" : "");
+        if (parseable_stats) fprintf(stderr, "[");
         for (int t = 0; t < s_totalBlockResult; t++) {
             printf("[%2d] 0x%08X\n", t, output[t]);
-            fprintf(stderr, "%s%u", (t > 0) ? "," : "", output[t]);
+            if (parseable_stats) fprintf(stderr, "%s%u", (t > 0) ? "," : "", output[t]);
         }
-        fprintf(stderr, "]");
+        if (parseable_stats) fprintf(stderr, "]");
     }
 
     free(output);
@@ -295,7 +313,7 @@ int main(int argc, char** argv) {
     printf("Total blocks:            %d\n", (int)s_totalBlockResult);
     printf("Using total time:        %.3f seconds\n", (float)tm);
     printf("Using time per block:    %.3f seconds\n", (float)tm/s_totalBlockResult);
-    {
+    if (parseable_stats) {
         Marker m("stats");
         fprintf(stderr, "{\"blocks\":%d,\"time\":%.3f}", (int)s_totalBlockResult, (float)tm);
     }
