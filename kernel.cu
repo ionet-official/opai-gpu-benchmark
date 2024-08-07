@@ -3,6 +3,8 @@
 
 #include "common.h"
 
+#include <vector>
+
 typedef float BTYPE;
 
 #define BLOCK_SIZE 1024
@@ -58,31 +60,42 @@ int main(int argc, char** argv) {
         throw std::string("No CUDA devices");
     }
 
-    for (int i = 0; i < deviceCount; i++)
     {
-        cudaDeviceProp devProp;
-        cudaGetDeviceProperties(&devProp, i);
-        printf("GPU Device %d:%s\n", i, devProp.name);
-        printf("Total GlobalMem: %zu MB\n", devProp.totalGlobalMem / 1024 / 1024);
-        printf("SM Count: %d\n", devProp.multiProcessorCount);
-        printf("Shared Mem / Block: %zu KB\n", devProp.sharedMemPerBlock / 1024);
-        printf("Max Threads / Block: %d\n", devProp.maxThreadsPerBlock);
-        printf("Regs / Block: %d\n", devProp.regsPerBlock);
-        printf("Max Threads / SM: %d\n", devProp.maxThreadsPerMultiProcessor);
-        printf("======================================================\n");
+        Marker m("device-info");
+        fprintf(stderr, "[");
+        for (int i = 0; i < deviceCount; i++)
+        {
+            cudaDeviceProp devProp;
+            cudaGetDeviceProperties(&devProp, i);
+            printf("GPU Device %d:%s\n", i, devProp.name);
+            printf("Total GlobalMem: %zu MB\n", devProp.totalGlobalMem / 1024 / 1024);
+            printf("SM Count: %d\n", devProp.multiProcessorCount);
+            printf("Shared Mem / Block: %zu KB\n", devProp.sharedMemPerBlock / 1024);
+            printf("Max Threads / Block: %d\n", devProp.maxThreadsPerBlock);
+            printf("Regs / Block: %d\n", devProp.regsPerBlock);
+            printf("Max Threads / SM: %d\n", devProp.maxThreadsPerMultiProcessor);
+            printf("======================================================\n");
+
+            fprintf(stderr, "{\"name\":\"%s\",\"global_mem\":%zu,\"sm_count\":%d,\"shared_block_mem\":%zu," \
+                            "\"max_block_threads\":%d,\"block_regs\":%d,\"max_sm_threads\":%d}%s",
+                devProp.name, devProp.totalGlobalMem, devProp.multiProcessorCount, devProp.sharedMemPerBlock,
+                devProp.maxThreadsPerBlock, devProp.regsPerBlock, devProp.maxThreadsPerMultiProcessor,
+                (i < deviceCount - 1) ? "," : "");
+        }
+        fprintf(stderr, "]");
     }
 
     //////////////////////////////////////////////////////
     // According to the GPU model, set the required video memory size
     
-    const int MAX_DEVICES = 8;
+    // const int MAX_DEVICES = 8;
 
     if (deviceCount<=0) {
         throw std::string("No GPU detected.");
     }
-    if (deviceCount > MAX_DEVICES ) {
-        throw std::string("Only supports up to 8 GPUs.");
-    }
+    // if (deviceCount > MAX_DEVICES ) {
+    //     throw std::string("Only supports up to 8 GPUs.");
+    // }
 
     int h_vmem_level = 0;
     ssize_t last_total_memory_gb = 0;
@@ -149,11 +162,11 @@ int main(int argc, char** argv) {
     const ssize_t s_gpuBlockCount = s_gpuStructSize / s_blockStructSize;
     const ssize_t s_totalBlockResult = deviceCount * s_gpuBlockCount ;
 
-    BTYPE* d_Cdata[MAX_DEVICES];
-    BTYPE* d_Adata[MAX_DEVICES];
-    BTYPE* d_Bdata[MAX_DEVICES];
+    std::vector<BTYPE*> d_Cdata(deviceCount);
+    std::vector<BTYPE*> d_Adata(deviceCount);
+    std::vector<BTYPE*> d_Bdata(deviceCount);
 
-    unsigned int* d_sum_data[MAX_DEVICES];
+    std::vector<unsigned int*> d_sum_data(deviceCount);
 
     printf("> Create Host Buffer: %zu MB... \n", 2 * s_blockBytesSize / 1024ul / 1024ul);
     BTYPE* A = (BTYPE*)malloc(s_blockBytesSize);
@@ -224,21 +237,26 @@ int main(int argc, char** argv) {
         }
 
         sumKernel <<< grid_size, block_size >> > (d_sum_data[i], d_Cdata[i], s_blockStructSize, s_gpuStructSize);
+
+        // Check for any errors launching the kernel 
+        cudaStatus = cudaGetLastError();
+        if (cudaStatus != cudaSuccess) {
+            fprintf(stderr, "calcKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+            return 0;
+        }
     }
 
-    // Check for any errors launching the kernel 
-    cudaStatus = cudaGetLastError();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "calcKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-        return 0;
-    }
+    for (int i = 0; i < deviceCount; i++) {
+        printf("> Waiting for Device[%d]... \n", i);
 
-    // cudaDeviceSynchronize waits for the kernel to finish, and returns
-    // any errors encountered during the launch.
-    cudaStatus = cudaDeviceSynchronize();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching iKernel!\n", cudaStatus);
-        return 0;
+        checkError(cudaSetDevice(i));
+        // cudaDeviceSynchronize waits for the kernel to finish, and returns
+        // any errors encountered during the launch.
+        cudaStatus = cudaDeviceSynchronize();
+        if (cudaStatus != cudaSuccess) {
+            fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching iKernel!\n", cudaStatus);
+            return 0;
+        }
     }
 
     /////////////////////////////////////////////////////////
@@ -259,8 +277,14 @@ int main(int argc, char** argv) {
         cudaFree(d_Cdata[i]);
     }
 
-    for (int t = 0; t < s_totalBlockResult; t++) {
-        printf("[%2d] 0x%08X\n", t, output[t]);
+    {
+        Marker m("compute-result");
+        fprintf(stderr, "[");
+        for (int t = 0; t < s_totalBlockResult; t++) {
+            printf("[%2d] 0x%08X\n", t, output[t]);
+            fprintf(stderr, "%s%u", (t > 0) ? "," : "", output[t]);
+        }
+        fprintf(stderr, "]");
     }
 
     free(output);
@@ -271,6 +295,10 @@ int main(int argc, char** argv) {
     printf("Total blocks:            %d\n", (int)s_totalBlockResult);
     printf("Using total time:        %.3f seconds\n", (float)tm);
     printf("Using time per block:    %.3f seconds\n", (float)tm/s_totalBlockResult);
+    {
+        Marker m("stats");
+        fprintf(stderr, "{\"blocks\":%d,\"time\":%.3f}", (int)s_totalBlockResult, (float)tm);
+    }
 
     return 0;
 }
