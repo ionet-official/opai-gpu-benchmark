@@ -51,6 +51,13 @@ size_t availMemory() {
     return freeMem;
 }
 
+#if !defined(IS_PRODUCTION) || IS_PRODUCTION != 1
+#define PRINTF_NONPROD(...) printf(__VA_ARGS__)
+#else
+// do not show anything to stdout when built with special flag
+#define PRINTF_NONPROD(...)
+#endif
+
 int main(int argc, char** argv) {
     if (argc > 2) {
         fprintf(stderr, "Usage: %s [timeout-in-sec]\n", argv[0]);
@@ -67,7 +74,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    printf("-- OPAI GPU Benchmark -- \n");
+    PRINTF_NONPROD("-- OPAI GPU Benchmark -- \n");
 
     int deviceCount;
     cudaGetDeviceCount(&deviceCount);
@@ -83,14 +90,14 @@ int main(int argc, char** argv) {
         {
             cudaDeviceProp devProp;
             cudaGetDeviceProperties(&devProp, i);
-            printf("GPU Device %d:%s\n", i, devProp.name);
-            printf("Total GlobalMem: %zu MB\n", devProp.totalGlobalMem / 1024 / 1024);
-            printf("SM Count: %d\n", devProp.multiProcessorCount);
-            printf("Shared Mem / Block: %zu KB\n", devProp.sharedMemPerBlock / 1024);
-            printf("Max Threads / Block: %d\n", devProp.maxThreadsPerBlock);
-            printf("Regs / Block: %d\n", devProp.regsPerBlock);
-            printf("Max Threads / SM: %d\n", devProp.maxThreadsPerMultiProcessor);
-            printf("======================================================\n");
+            PRINTF_NONPROD("GPU Device %d:%s\n", i, devProp.name);
+            PRINTF_NONPROD("Total GlobalMem: %zu MB\n", devProp.totalGlobalMem / 1024 / 1024);
+            PRINTF_NONPROD("SM Count: %d\n", devProp.multiProcessorCount);
+            PRINTF_NONPROD("Shared Mem / Block: %zu KB\n", devProp.sharedMemPerBlock / 1024);
+            PRINTF_NONPROD("Max Threads / Block: %d\n", devProp.maxThreadsPerBlock);
+            PRINTF_NONPROD("Regs / Block: %d\n", devProp.regsPerBlock);
+            PRINTF_NONPROD("Max Threads / SM: %d\n", devProp.maxThreadsPerMultiProcessor);
+            PRINTF_NONPROD("======================================================\n");
 
             if (parseable_stats) {
                 fprintf(stderr, "{\"name\":\"%s\",\"global_mem\":%zu,\"sm_count\":%d,\"shared_block_mem\":%zu," \
@@ -161,7 +168,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    printf("> Switch to GPU level: %s\n", h_level_name.c_str());
+    PRINTF_NONPROD("> Switch to GPU level: %s\n", h_level_name.c_str());
         
     /////////////////////////////////////////////////////
 
@@ -186,7 +193,7 @@ int main(int argc, char** argv) {
 
     std::vector<unsigned int*> d_sum_data(deviceCount);
 
-    printf("> Create Host Buffer: %zu MB... \n", 2 * s_blockBytesSize / 1024ul / 1024ul);
+    PRINTF_NONPROD("> Create Host Buffer: %zu MB... \n", 2 * s_blockBytesSize / 1024ul / 1024ul);
     BTYPE* A = (BTYPE*)malloc(s_blockBytesSize);
     BTYPE* B = (BTYPE*)malloc(s_blockBytesSize);
 
@@ -197,7 +204,7 @@ int main(int argc, char** argv) {
 
     //Based on the initialization seed, expand the initialization data tables A and B
     for (int i = 0; i < deviceCount; i++) {
-        printf("> Create Device[%d] Buffer: %zu GB... \n", i, s_gpuDataBytes / 1024ul / 1024ul / 1024ul);
+        PRINTF_NONPROD("> Create Device[%d] Buffer: %zu GB... \n", i, s_gpuDataBytes / 1024ul / 1024ul / 1024ul);
 
         checkError(cudaSetDevice(i));
 
@@ -228,17 +235,17 @@ int main(int argc, char** argv) {
 
     cudaError_t cudaStatus;
 
-    printf("> Start compute... \n");
+    PRINTF_NONPROD("> Start compute... \n");
     
     for (int i = 0; i < deviceCount; i++) {
-        printf("> Execute the task of Device[%d]... \n", i);
+        PRINTF_NONPROD("> Execute the task of Device[%d]... \n", i);
 
         checkError(cudaSetDevice(i));
 
         int block_size = BLOCK_SIZE;
         int grid_size = (int)(s_gpuStructSize / block_size);
 
-        //printf("grid_size: %d  block_size:%d  gpuStructSize:%zu  s_gpuBlockCount:%zu\n", grid_size, block_size, s_gpuStructSize, s_gpuBlockCount);
+        //PRINTF_NONPROD("grid_size: %d  block_size:%d  gpuStructSize:%zu  s_gpuBlockCount:%zu\n", grid_size, block_size, s_gpuStructSize, s_gpuBlockCount);
 
         for (int iters = 0; iters < MAIN_CYCLE_TIMES; iters++) {
             calcKernel <<< grid_size, block_size >>> (CALC_CYCLE_TIMES, d_Cdata[i], d_Adata[i], d_Bdata[i], s_gpuStructSize);
@@ -265,7 +272,7 @@ int main(int argc, char** argv) {
     }
 
     for (int i = 0; i < deviceCount; i++) {
-        printf("> Waiting for Device[%d]... \n", i);
+        PRINTF_NONPROD("> Waiting for Device[%d]... \n", i);
 
         checkError(cudaSetDevice(i));
         // cudaDeviceSynchronize waits for the kernel to finish, and returns
@@ -279,7 +286,7 @@ int main(int argc, char** argv) {
 
     /////////////////////////////////////////////////////////
 
-    printf("> Get calculation outputs from GPU.\n");
+    PRINTF_NONPROD("> Get calculation outputs from GPU.\n");
 
     unsigned int* output = (unsigned int*)malloc(s_totalBlockResult * sizeof(unsigned int));
 
@@ -299,7 +306,7 @@ int main(int argc, char** argv) {
         Marker m(parseable_stats ? "compute-result" : "");
         if (parseable_stats) fprintf(stderr, "[");
         for (int t = 0; t < s_totalBlockResult; t++) {
-            printf("[%2d] 0x%08X\n", t, output[t]);
+            PRINTF_NONPROD("[%2d] 0x%08X\n", t, output[t]);
             if (parseable_stats) fprintf(stderr, "%s%u", (t > 0) ? "," : "", output[t]);
         }
         if (parseable_stats) fprintf(stderr, "]");
@@ -309,10 +316,10 @@ int main(int argc, char** argv) {
 
     tm = getTime() - tm;
 
-    printf("\n\n");
-    printf("Total blocks:            %d\n", (int)s_totalBlockResult);
-    printf("Using total time:        %.3f seconds\n", (float)tm);
-    printf("Using time per block:    %.3f seconds\n", (float)tm/s_totalBlockResult);
+    PRINTF_NONPROD("\n\n");
+    PRINTF_NONPROD("Total blocks:            %d\n", (int)s_totalBlockResult);
+    PRINTF_NONPROD("Using total time:        %.3f seconds\n", (float)tm);
+    PRINTF_NONPROD("Using time per block:    %.3f seconds\n", (float)tm/s_totalBlockResult);
     if (parseable_stats) {
         Marker m("stats");
         fprintf(stderr, "{\"blocks\":%d,\"time\":%.3f}", (int)s_totalBlockResult, (float)tm);

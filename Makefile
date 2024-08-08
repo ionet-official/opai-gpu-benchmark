@@ -8,6 +8,7 @@ IS_JETSON   ?= $(shell if grep -Fwq "Jetson" /proc/device-tree/model 2>/dev/null
 NVCC        :=  ${CUDAPATH}/bin/nvcc
 CCPATH      ?=
 
+IS_PRODUCTION ?= 0
 BUILD_DIR ?= build
 MARKER := $(BUILD_DIR)/.marker
 
@@ -17,6 +18,7 @@ override CFLAGS   += -Wno-unused-result
 override CFLAGS   += -I${CUDAPATH}/include
 override CFLAGS   += -std=c++11
 override CFLAGS   += -DIS_JETSON=${IS_JETSON}
+override CFLAGS   += -DIS_PRODUCTION=${IS_PRODUCTION}
 
 override LDFLAGS  ?=
 override LDFLAGS  += -lcuda
@@ -38,6 +40,7 @@ IMAGE_DISTRO ?= ubi8
 override NVCCFLAGS ?=
 override NVCCFLAGS += -I${CUDAPATH}/include
 override NVCCFLAGS += -arch=compute_$(subst .,,${COMPUTE})
+override NVCCFLAGS += -DIS_PRODUCTION=${IS_PRODUCTION}
 
 IMAGE_NAME ?= cudabench
 
@@ -76,5 +79,5 @@ clean:
 
 dockerized: Dockerfile
 	docker build . -t cuda-build:11.8
-	docker run --volume $(CURDIR):/benchmark --user $(shell id -u) cuda-build:11.8 make BUILD_DIR=build-docker -C /benchmark clean all
+	docker run --volume $(CURDIR):/benchmark --user $(shell id -u) cuda-build:11.8 make BUILD_DIR=build-docker COMPUTE=61 IS_PRODUCTION=1 -C /benchmark clean all
 	docker run -it --volume $(CURDIR):/benchmark --gpus all --entrypoint /bin/bash brunneis/python:3.9.0-ubuntu -c '/benchmark/build-docker/cudabench 600'
