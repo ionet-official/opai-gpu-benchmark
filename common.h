@@ -34,7 +34,8 @@ void _checkError(int rCode, std::string file, int line, std::string desc = "") {
                 : (std::string("Error in ") + desc + " (")) +
             file + ":" + std::to_string(line) + "): " + err;
 
-        printf("# %s\n", errstr.c_str());
+        fprintf(stderr, "# %s\n", errstr.c_str());
+        fflush(stderr);
 
         throw std::runtime_error(errstr);
         // Yes, this *is* a memory leak, but this block is only executed on
@@ -88,3 +89,18 @@ double getTime() {
 
 #endif // WIN32
 
+struct Marker {
+    Marker(const std::string& name): loud(name.size() > 0) {
+        if (loud) {
+            fprintf(stderr, "<MARK>%s:", name.c_str());
+            fflush(stderr);
+        }
+    }
+    ~Marker() {
+        if (loud) {
+            fprintf(stderr, "</MARK>\n");
+            fflush(stderr);
+        }
+    }
+    bool loud;
+};

@@ -1,7 +1,10 @@
-﻿#include <cuda_runtime.h>  
+﻿#include <vector>
+
+#include <cuda_runtime.h>
 #include <cuda_fp16.h>
 
 #include "common.h"
+#include "timer.h"
 
 typedef float BTYPE;
 
@@ -48,8 +51,30 @@ size_t availMemory() {
     return freeMem;
 }
 
+#if !defined(IS_PRODUCTION) || IS_PRODUCTION != 1
+#define PRINTF_NONPROD(...) printf(__VA_ARGS__)
+#else
+// do not show anything to stdout when built with special flag
+#define PRINTF_NONPROD(...)
+#endif
+
 int main(int argc, char** argv) {
-    printf("-- OPAI GPU Benchmark -- \n");
+    if (argc > 2) {
+        fprintf(stderr, "Usage: %s [timeout-in-sec]\n", argv[0]);
+        return 1;
+    }
+    int timeout = -1;
+    bool parseable_stats = false;
+    Killswitch timer;
+    if (argc > 1) {
+        timeout = std::stoi(argv[1]);
+        if (timeout > 0) {
+            parseable_stats = true;
+            timer.start(timeout);
+        }
+    }
+
+    PRINTF_NONPROD("-- OPAI GPU Benchmark -- \n");
 
     int deviceCount;
     cudaGetDeviceCount(&deviceCount);
@@ -58,31 +83,44 @@ int main(int argc, char** argv) {
         throw std::string("No CUDA devices");
     }
 
-    for (int i = 0; i < deviceCount; i++)
     {
-        cudaDeviceProp devProp;
-        cudaGetDeviceProperties(&devProp, i);
-        printf("GPU Device %d:%s\n", i, devProp.name);
-        printf("Total GlobalMem: %zu MB\n", devProp.totalGlobalMem / 1024 / 1024);
-        printf("SM Count: %d\n", devProp.multiProcessorCount);
-        printf("Shared Mem / Block: %zu KB\n", devProp.sharedMemPerBlock / 1024);
-        printf("Max Threads / Block: %d\n", devProp.maxThreadsPerBlock);
-        printf("Regs / Block: %d\n", devProp.regsPerBlock);
-        printf("Max Threads / SM: %d\n", devProp.maxThreadsPerMultiProcessor);
-        printf("======================================================\n");
+        Marker m(parseable_stats ? "device-info" : "");
+        if (parseable_stats) fprintf(stderr, "[");
+        for (int i = 0; i < deviceCount; i++)
+        {
+            cudaDeviceProp devProp;
+            cudaGetDeviceProperties(&devProp, i);
+            PRINTF_NONPROD("GPU Device %d:%s\n", i, devProp.name);
+            PRINTF_NONPROD("Total GlobalMem: %zu MB\n", devProp.totalGlobalMem / 1024 / 1024);
+            PRINTF_NONPROD("SM Count: %d\n", devProp.multiProcessorCount);
+            PRINTF_NONPROD("Shared Mem / Block: %zu KB\n", devProp.sharedMemPerBlock / 1024);
+            PRINTF_NONPROD("Max Threads / Block: %d\n", devProp.maxThreadsPerBlock);
+            PRINTF_NONPROD("Regs / Block: %d\n", devProp.regsPerBlock);
+            PRINTF_NONPROD("Max Threads / SM: %d\n", devProp.maxThreadsPerMultiProcessor);
+            PRINTF_NONPROD("======================================================\n");
+
+            if (parseable_stats) {
+                fprintf(stderr, "{\"name\":\"%s\",\"global_mem\":%zu,\"sm_count\":%d,\"shared_block_mem\":%zu," \
+                                "\"max_block_threads\":%d,\"block_regs\":%d,\"max_sm_threads\":%d}%s",
+                    devProp.name, devProp.totalGlobalMem, devProp.multiProcessorCount, devProp.sharedMemPerBlock,
+                    devProp.maxThreadsPerBlock, devProp.regsPerBlock, devProp.maxThreadsPerMultiProcessor,
+                    (i < deviceCount - 1) ? "," : "");
+            }
+        }
+        if (parseable_stats) fprintf(stderr, "]");
     }
 
     //////////////////////////////////////////////////////
     // According to the GPU model, set the required video memory size
     
-    const int MAX_DEVICES = 8;
+    // const int MAX_DEVICES = 8;
 
     if (deviceCount<=0) {
         throw std::string("No GPU detected.");
     }
-    if (deviceCount > MAX_DEVICES ) {
-        throw std::string("Only supports up to 8 GPUs.");
-    }
+    // if (deviceCount > MAX_DEVICES ) {
+    //     throw std::string("Only supports up to 8 GPUs.");
+    // }
 
     int h_vmem_level = 0;
     ssize_t last_total_memory_gb = 0;
@@ -130,7 +168,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    printf("> Switch to GPU level: %s\n", h_level_name.c_str());
+    PRINTF_NONPROD("> Switch to GPU level: %s\n", h_level_name.c_str());
         
     /////////////////////////////////////////////////////
 
@@ -149,13 +187,13 @@ int main(int argc, char** argv) {
     const ssize_t s_gpuBlockCount = s_gpuStructSize / s_blockStructSize;
     const ssize_t s_totalBlockResult = deviceCount * s_gpuBlockCount ;
 
-    BTYPE* d_Cdata[MAX_DEVICES];
-    BTYPE* d_Adata[MAX_DEVICES];
-    BTYPE* d_Bdata[MAX_DEVICES];
+    std::vector<BTYPE*> d_Cdata(deviceCount);
+    std::vector<BTYPE*> d_Adata(deviceCount);
+    std::vector<BTYPE*> d_Bdata(deviceCount);
 
-    unsigned int* d_sum_data[MAX_DEVICES];
+    std::vector<unsigned int*> d_sum_data(deviceCount);
 
-    printf("> Create Host Buffer: %zu MB... \n", 2 * s_blockBytesSize / 1024ul / 1024ul);
+    PRINTF_NONPROD("> Create Host Buffer: %zu MB... \n", 2 * s_blockBytesSize / 1024ul / 1024ul);
     BTYPE* A = (BTYPE*)malloc(s_blockBytesSize);
     BTYPE* B = (BTYPE*)malloc(s_blockBytesSize);
 
@@ -166,7 +204,7 @@ int main(int argc, char** argv) {
 
     //Based on the initialization seed, expand the initialization data tables A and B
     for (int i = 0; i < deviceCount; i++) {
-        printf("> Create Device[%d] Buffer: %zu GB... \n", i, s_gpuDataBytes / 1024ul / 1024ul / 1024ul);
+        PRINTF_NONPROD("> Create Device[%d] Buffer: %zu GB... \n", i, s_gpuDataBytes / 1024ul / 1024ul / 1024ul);
 
         checkError(cudaSetDevice(i));
 
@@ -197,17 +235,17 @@ int main(int argc, char** argv) {
 
     cudaError_t cudaStatus;
 
-    printf("> Start compute... \n");
+    PRINTF_NONPROD("> Start compute... \n");
     
     for (int i = 0; i < deviceCount; i++) {
-        printf("> Execute the task of Device[%d]... \n", i);
+        PRINTF_NONPROD("> Execute the task of Device[%d]... \n", i);
 
         checkError(cudaSetDevice(i));
 
         int block_size = BLOCK_SIZE;
         int grid_size = (int)(s_gpuStructSize / block_size);
 
-        //printf("grid_size: %d  block_size:%d  gpuStructSize:%zu  s_gpuBlockCount:%zu\n", grid_size, block_size, s_gpuStructSize, s_gpuBlockCount);
+        //PRINTF_NONPROD("grid_size: %d  block_size:%d  gpuStructSize:%zu  s_gpuBlockCount:%zu\n", grid_size, block_size, s_gpuStructSize, s_gpuBlockCount);
 
         for (int iters = 0; iters < MAIN_CYCLE_TIMES; iters++) {
             calcKernel <<< grid_size, block_size >>> (CALC_CYCLE_TIMES, d_Cdata[i], d_Adata[i], d_Bdata[i], s_gpuStructSize);
@@ -224,26 +262,31 @@ int main(int argc, char** argv) {
         }
 
         sumKernel <<< grid_size, block_size >> > (d_sum_data[i], d_Cdata[i], s_blockStructSize, s_gpuStructSize);
+
+        // Check for any errors launching the kernel 
+        cudaStatus = cudaGetLastError();
+        if (cudaStatus != cudaSuccess) {
+            fprintf(stderr, "calcKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+            return 2;
+        }
     }
 
-    // Check for any errors launching the kernel 
-    cudaStatus = cudaGetLastError();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "calcKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-        return 0;
-    }
+    for (int i = 0; i < deviceCount; i++) {
+        PRINTF_NONPROD("> Waiting for Device[%d]... \n", i);
 
-    // cudaDeviceSynchronize waits for the kernel to finish, and returns
-    // any errors encountered during the launch.
-    cudaStatus = cudaDeviceSynchronize();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching iKernel!\n", cudaStatus);
-        return 0;
+        checkError(cudaSetDevice(i));
+        // cudaDeviceSynchronize waits for the kernel to finish, and returns
+        // any errors encountered during the launch.
+        cudaStatus = cudaDeviceSynchronize();
+        if (cudaStatus != cudaSuccess) {
+            fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching iKernel!\n", cudaStatus);
+            return 3;
+        }
     }
 
     /////////////////////////////////////////////////////////
 
-    printf("> Get calculation outputs from GPU.\n");
+    PRINTF_NONPROD("> Get calculation outputs from GPU.\n");
 
     unsigned int* output = (unsigned int*)malloc(s_totalBlockResult * sizeof(unsigned int));
 
@@ -259,18 +302,28 @@ int main(int argc, char** argv) {
         cudaFree(d_Cdata[i]);
     }
 
-    for (int t = 0; t < s_totalBlockResult; t++) {
-        printf("[%2d] 0x%08X\n", t, output[t]);
+    {
+        Marker m(parseable_stats ? "compute-result" : "");
+        if (parseable_stats) fprintf(stderr, "[");
+        for (int t = 0; t < s_totalBlockResult; t++) {
+            PRINTF_NONPROD("[%2d] 0x%08X\n", t, output[t]);
+            if (parseable_stats) fprintf(stderr, "%s%u", (t > 0) ? "," : "", output[t]);
+        }
+        if (parseable_stats) fprintf(stderr, "]");
     }
 
     free(output);
 
     tm = getTime() - tm;
 
-    printf("\n\n");
-    printf("Total blocks:            %d\n", (int)s_totalBlockResult);
-    printf("Using total time:        %.3f seconds\n", (float)tm);
-    printf("Using time per block:    %.3f seconds\n", (float)tm/s_totalBlockResult);
+    PRINTF_NONPROD("\n\n");
+    PRINTF_NONPROD("Total blocks:            %d\n", (int)s_totalBlockResult);
+    PRINTF_NONPROD("Using total time:        %.3f seconds\n", (float)tm);
+    PRINTF_NONPROD("Using time per block:    %.3f seconds\n", (float)tm/s_totalBlockResult);
+    if (parseable_stats) {
+        Marker m("stats");
+        fprintf(stderr, "{\"blocks\":%d,\"time\":%.3f}", (int)s_totalBlockResult, (float)tm);
+    }
 
     return 0;
 }
