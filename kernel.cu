@@ -18,7 +18,7 @@ typedef float BTYPE;
 
 __global__ void calcKernel(int round, BTYPE* c, BTYPE* a, BTYPE* b, const ssize_t N)
 {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const ssize_t i = static_cast<ssize_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if (i < N)
     {
         for (int t = 0; t < round; t++) {
@@ -31,7 +31,7 @@ __global__ void calcKernel(int round, BTYPE* c, BTYPE* a, BTYPE* b, const ssize_
 
 __global__ void sumKernel(unsigned int* output, const BTYPE* input, const ssize_t sumBlockLength, const ssize_t N)
 {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const ssize_t i = static_cast<ssize_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if (i < N)
     {
         unsigned int value = (unsigned int)(input[i] * 1812433253);
@@ -279,7 +279,7 @@ int main(int argc, char** argv) {
         // any errors encountered during the launch.
         cudaStatus = cudaDeviceSynchronize();
         if (cudaStatus != cudaSuccess) {
-            fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching iKernel!\n", cudaStatus);
+            fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching iKernel (%s)!\n", cudaStatus, cudaGetErrorString(cudaStatus));
             return 3;
         }
     }

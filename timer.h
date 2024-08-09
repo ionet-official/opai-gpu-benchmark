@@ -8,7 +8,7 @@
 class Killswitch {
 public:
     Killswitch(): mRunning(false) {}
-    ~Killswitch() { stop(); }
+    ~Killswitch() { if (mRunning) stop(); }
 
     void start(const int seconds) {
         mRunning = true;
