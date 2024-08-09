@@ -68,7 +68,7 @@ $(BUILD_DIR)/%.o: %.cpp $(MARKER)
 #%.ptx: %.cu
 #	PATH="${PATH}:${CCPATH}:." ${NVCC} ${NVCCFLAGS} -ptx $< -o $@
 
-$(BUILD_DIR)/%.o: %.cu $(MARKER)
+$(BUILD_DIR)/%.o: %.cu *.h $(MARKER)
 	PATH="${PATH}:${CCPATH}:." ${NVCC} ${NVCCFLAGS} -c $< -o $@
 
 clean:
