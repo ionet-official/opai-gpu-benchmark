@@ -80,7 +80,7 @@ int main(int argc, char** argv) {
     cudaGetDeviceCount(&deviceCount);
 
     if (deviceCount <= 0) {
-        throw std::string("No CUDA devices");
+        throw std::runtime_error("No CUDA devices");
     }
 
     {
@@ -116,10 +116,10 @@ int main(int argc, char** argv) {
     // const int MAX_DEVICES = 8;
 
     if (deviceCount<=0) {
-        throw std::string("No GPU detected.");
+        throw std::runtime_error("No GPU detected.");
     }
     // if (deviceCount > MAX_DEVICES ) {
-    //     throw std::string("Only supports up to 8 GPUs.");
+    //     throw std::runtime_error("Only supports up to 8 GPUs.");
     // }
 
     int h_vmem_level = 0;
@@ -132,13 +132,13 @@ int main(int argc, char** argv) {
         ssize_t avail_memory = availMemory();
         ssize_t total_memory = totalMemory();
         if ( (double)avail_memory / (double)total_memory < USEMEM) {
-            throw std::string("Insufficient GPU memory.");
+            throw std::runtime_error("Insufficient GPU memory.");
         }
         ssize_t avail_memory_gb = avail_memory / (1024ul * 1024ul * 1024ul);
         ssize_t total_memory_gb = total_memory / (1024ul * 1024ul * 1024ul);
 
         if (last_total_memory_gb !=0 && last_total_memory_gb != total_memory_gb) {
-            throw std::string("Requires the same GPU memory size to benchmark.");
+            throw std::runtime_error("Requires the same GPU memory size to benchmark.");
         }
 
         last_total_memory_gb = total_memory_gb;
@@ -164,7 +164,7 @@ int main(int argc, char** argv) {
             h_level_name = "8GB";
         }
         else {
-            throw std::string("GPU memory is too low to benchmark.");
+            throw std::runtime_error("GPU memory is too low to benchmark.");
         }
     }
 
